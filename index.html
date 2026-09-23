@@ -107,10 +107,18 @@
             }
         };
 
-        let map, myMarker, latOrig = null, lonOrig = null;
+        let map, myMarker, driverMarker;
+        let latOrig = null, lonOrig = null;
+
+        // Ícono personalizado para el auto del conductor en el mapa del pasajero
+        let carIcon = L.divIcon({ 
+            html: '<div style="font-size:26px; text-shadow: 0 0 5px #000;">🚗</div>', 
+            className: 'car-icon',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
 
         function iniciarMapaPasajero() {
-            // Mapa base centrado de manera genérica mientras carga la posición real
             map = L.map('map').setView([19.4326, -99.1332], 15);
             L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', { attribution: '&copy; CARTO' }).addTo(map);
 
@@ -119,7 +127,6 @@
                 return;
             }
 
-            // Exigir permisos de ubicación con alta precisión
             navigator.geolocation.getCurrentPosition(
                 pos => {
                     latOrig = pos.coords.latitude;
@@ -128,7 +135,6 @@
                     map.setView([latOrig, lonOrig], 16);
                     myMarker = L.marker([latOrig, lonOrig]).addTo(map).bindPopup("Tu ubicación exacta").openPopup();
 
-                    // ¡Permiso concedido! Desbloqueamos el botón de solicitar viaje
                     let gpsStatus = document.getElementById('gpsStatus');
                     gpsStatus.style.color = "#00ff66";
                     gpsStatus.innerText = "✔ Ubicación GPS verificada con éxito";
@@ -139,7 +145,6 @@
                     btnPedir.style.cursor = "pointer";
                 },
                 error => {
-                    // Si el usuario deniega el permiso o falla el GPS
                     let gpsStatus = document.getElementById('gpsStatus');
                     gpsStatus.style.color = "#ff3333";
                     gpsStatus.innerText = "❌ Permiso de ubicación denegado. Obligatorio activarlo para pedir viajes.";
@@ -150,7 +155,6 @@
         }
 
         window.pedirViaje = function() {
-            // Doble validación estricta de seguridad
             if (latOrig === null || lonOrig === null) {
                 alert("No se puede enviar la solicitud porque faltan tus coordenadas GPS. Otorga permisos de ubicación.");
                 return;
@@ -198,6 +202,23 @@
                     document.getElementById('driverInfo').style.display = 'block';
                     document.getElementById('dName').innerText = t.driver_nombre;
                     document.getElementById('driverWpLink').href = `https://wa.me/${t.driver_tel}`;
+
+                    // VERIFICAR Y MOSTRAR LA UBICACIÓN EN TIEMPO REAL DEL CONDUCTOR
+                    if (t.lat_driver && t.lon_driver) {
+                        let driverLatLang = [t.lat_driver, t.lon_driver];
+
+                        if (!driverMarker) {
+                            // Si el marcador del auto aún no existe en el mapa, lo creamos
+                            driverMarker = L.marker(driverLatLang, { icon: carIcon }).addTo(map)
+                                .bindPopup(`Conductor: ${t.driver_nombre}`).openPopup();
+                            
+                            // Opcional: Centrar el mapa para enfocar al conductor y al pasajero al mismo tiempo
+                            map.setView(driverLatLang, 16);
+                        } else {
+                            // Si ya existe, solo actualizamos su posición suavemente en el mapa
+                            driverMarker.setLatLng(driverLatLang);
+                        }
+                    }
                 }
             });
         }
