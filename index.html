@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uber Black - Pasajero</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #000; color: #fff; font-family: sans-serif; }
+        #map { height: 50vh; width: 100vw; }
+        .panel { padding: 20px; background: #121212; border-top-left-radius: 20px; border-top-right-radius: 20px; margin-top: -20px; position: relative; z-index: 1000; box-shadow: 0 -5px 20px rgba(0,0,0,0.8); }
+        input, button { width: 100%; padding: 12px; margin: 8px 0; background: #222; border: 1px solid #333; color: #fff; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        button { background: #fff; color: #000; font-weight: bold; cursor: pointer; }
+        #loginPasajeroPanel, #appPasajeroMain { height: 100vh; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
+        #loginPasajeroPanel { padding: 20px; background: #121212; position: absolute; top: 0; left: 0; width: 100%; z-index: 3000; }
+    </style>
+</head>
+<body>
+
+    <!-- Panel de Registro / Login Inicial del Pasajero -->
+    <div id="loginPasajeroPanel">
+        <h2>Bienvenido a Primo</h2>
+        <p style="color: #aaa; font-size: 14px;">Ingresa tus datos una sola vez para pedir viajes rápidamente.</p>
+        <input type="text" id="nombrePasajeroReg" placeholder="Tu Nombre Completo" required>
+        <input type="tel" id="telPasajeroReg" placeholder="Tu WhatsApp (ej: +54911...)" required>
+        <button onclick="guardarLoginPasajero()">GUARDAR Y CONTINUAR</button>
+    </div>
+
+    <!-- Interfaz Principal del Pasajero -->
+    <div id="appPasajeroMain" style="display:none; height:auto;">
+        <div id="map"></div>
+        <div class="panel">
+            <h2>Pedir Viaje <span id="saludoPasajero" style="font-size:12px; float:right; color:#aaa;"></span></h2>
+            
+            <div id="tripForm">
+                <input type="text" id="origen" placeholder="Dirección de Origen" required>
+                <input type="text" id="destino" placeholder="Dirección de Destino" required>
+                <button onclick="pedirViaje()">SOLICITAR VIAJE</button>
+                <button onclick="cerrarSesionPasajero()" style="background:#222; color:#ff4444; border:1px solid #444; margin-top:15px;">CERRAR SESIÓN</button>
+            </div>
+
+            <div id="statusView" style="display:none;">
+                <h3 id="statusText" style="color: #ff9900;">Buscando conductor...</h3>
+                <div id="driverInfo" style="background:#1e1e1e; padding:15px; border-radius:10px; margin-top:10px; display:none;">
+                    <p><b>Conductor:</b> <span id="dName"></span></p>
+                    <a id="driverWpLink" target="_blank" style="display:block; text-align:center; background:#25D366; color:#fff; padding:10px; border-radius:6px; text-decoration:none; font-weight:bold; margin-top:8px;">Llamar a driver</a>
+                </div>
+                <button onclick="cancelarViaje()" style="background:#ff3333; color:#fff; margin-top:15px;">CANCELAR VIAJE</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        const firebaseConfig = {
+             apiKey: "AIzaSyAin871jE4-Ud9rCwK6GDEI7ZRNL3L0ITU",
+            authDomain: "taxiapp-d7257.firebaseapp.com",
+            databaseURL: "https://taxiapp-d7257-default-rtdb.firebaseio.com/",
+            projectId: "taxiapp-d7257",
+            storageBucket: "taxiapp-d7257.firebasestorage.app",
+            messagingSenderId: "505391560405",
+            appId: "1:505391560405:web:564530afc4327f16ef145c"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        window.guardarLoginPasajero = function() {
+            let nombre = document.getElementById('nombrePasajeroReg').value.trim();
+            let tel = document.getElementById('telPasajeroReg').value.trim();
+            if(!nombre || !tel) { alert("Por favor completa ambos campos."); return; }
+            
+            localStorage.setItem("pasajero_nombre", nombre);
+            localStorage.setItem("pasajero_tel", tel);
+            location.reload();
+        }
+
+        window.cerrarSesionPasajero = function() {
+            if(confirm("¿Estás seguro de cerrar sesión?")) {
+                localStorage.removeItem("pasajero_nombre");
+                localStorage.removeItem("pasajero_tel");
+                localStorage.removeItem("trip_id");
+                location.reload();
+            }
+        }
+
+        window.onload = () => {
+            let nombre = localStorage.getItem("pasajero_nombre");
+            let tel = localStorage.getItem("pasajero_tel");
+
+            if(nombre && tel) {
+                document.getElementById('loginPasajeroPanel').style.display = 'none';
+                document.getElementById('appPasajeroMain').style.display = 'block';
+                document.getElementById('saludoPasajero').innerText = `Hola, ${nombre}`;
+                iniciarMapaPasajero();
+            }
+
+            let savedId = localStorage.getItem("trip_id");
+            if(savedId) {
+                document.getElementById('tripForm').style.display = 'none';
+                document.getElementById('statusView').style.display = 'block';
+                escucharViaje(savedId);
+            }
+        };
+
+        let map, myMarker, latOrig = 19.4326, lonOrig = -99.1332;
+
+        function iniciarMapaPasajero() {
+            map = L.map('map').setView([latOrig, lonOrig], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', { attribution: '&copy; CARTO' }).addTo(map);
+
+            navigator.geolocation.getCurrentPosition(pos => {
+                latOrig = pos.coords.latitude;
+                lonOrig = pos.coords.longitude;
+                map.setView([latOrig, lonOrig], 16);
+                myMarker = L.marker([latOrig, lonOrig]).addTo(map).bindPopup("Tu ubicación").openPopup();
+            }, () => {});
+        }
+
+        window.pedirViaje = function() {
+            let origen = document.getElementById('origen').value.trim();
+            let destino = document.getElementById('destino').value.trim();
+            if(!origen || !destino) { alert("Ingresa origen y destino."); return; }
+
+            let tripId = "trip_" + Date.now();
+            let pasajeroNombre = localStorage.getItem("pasajero_nombre");
+            let pasajeroTel = localStorage.getItem("pasajero_tel");
+
+            set(ref(db, 'carreras/' + tripId), {
+                id: tripId,
+                pasajero: pasajeroNombre,
+                telefono: pasajeroTel,
+                origen: origen,
+                destino: destino,
+                lat_orig: latOrig,
+                lon_orig: lonOrig,
+                estado: "BUSCANDO"
+            });
+
+            localStorage.setItem("trip_id", tripId);
+            document.getElementById('tripForm').style.display = 'none';
+            document.getElementById('statusView').style.display = 'block';
+            escucharViaje(tripId);
+        }
+
+        function escucharViaje(id) {
+            onValue(ref(db, 'carreras/' + id), (snapshot) => {
+                let t = snapshot.val();
+                if(!t) {
+                    alert("El viaje ha finalizado o fue cancelado.");
+                    localStorage.removeItem("trip_id");
+                    location.reload();
+                    return;
+                }
+
+                let statusEl = document.getElementById('statusText');
+                statusEl.innerText = `Estado: ${t.estado}`;
+
+                if(t.estado === "ACEPTADO" || t.estado === "EN CAMINO" || t.estado === "ESTAMOS AFUERA" || t.estado === "EN PROCESO") {
+                    document.getElementById('driverInfo').style.display = 'block';
+                    document.getElementById('dName').innerText = t.driver_nombre;
+                    document.getElementById('driverWpLink').href = `https://wa.me/${t.driver_tel}`;
+                }
+            });
+        }
+
+        window.cancelarViaje = function() {
+            let id = localStorage.getItem("trip_id");
+            if(id) { remove(ref(db, 'carreras/' + id)); }
+            localStorage.removeItem("trip_id");
+            location.reload();
+        }
+    </script>
+</body>
+</html>
