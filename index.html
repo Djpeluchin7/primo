@@ -33,9 +33,10 @@
             <h2>Pedir Viaje <span id="saludoPasajero" style="font-size:12px; float:right; color:#aaa;"></span></h2>
             
             <div id="tripForm">
+                <p id="gpsStatus" style="color: #ff9900; font-size: 13px; margin: 0 0 8px 0;">📍 Obteniendo tu ubicación GPS obligatoria...</p>
                 <input type="text" id="origen" placeholder="Dirección de Origen" required>
                 <input type="text" id="destino" placeholder="Dirección de Destino" required>
-                <button onclick="pedirViaje()">SOLICITAR VIAJE</button>
+                <button id="btnPedir" onclick="pedirViaje()" style="opacity: 0.5; cursor: not-allowed;" disabled>SOLICITAR VIAJE</button>
                 <button onclick="cerrarSesionPasajero()" style="background:#222; color:#ff4444; border:1px solid #444; margin-top:15px;">CERRAR SESIÓN</button>
             </div>
 
@@ -56,7 +57,7 @@
         import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
         const firebaseConfig = {
-             apiKey: "AIzaSyAin871jE4-Ud9rCwK6GDEI7ZRNL3L0ITU",
+            apiKey: "AIzaSyAin871jE4-Ud9rCwK6GDEI7ZRNL3L0ITU",
             authDomain: "taxiapp-d7257.firebaseapp.com",
             databaseURL: "https://taxiapp-d7257-default-rtdb.firebaseio.com/",
             projectId: "taxiapp-d7257",
@@ -106,24 +107,58 @@
             }
         };
 
-        let map, myMarker, latOrig = 19.4326, lonOrig = -99.1332;
+        let map, myMarker, latOrig = null, lonOrig = null;
 
         function iniciarMapaPasajero() {
-            map = L.map('map').setView([latOrig, lonOrig], 15);
+            // Mapa base centrado de manera genérica mientras carga la posición real
+            map = L.map('map').setView([19.4326, -99.1332], 15);
             L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', { attribution: '&copy; CARTO' }).addTo(map);
 
-            navigator.geolocation.getCurrentPosition(pos => {
-                latOrig = pos.coords.latitude;
-                lonOrig = pos.coords.longitude;
-                map.setView([latOrig, lonOrig], 16);
-                myMarker = L.marker([latOrig, lonOrig]).addTo(map).bindPopup("Tu ubicación").openPopup();
-            }, () => {});
+            if (!navigator.geolocation) {
+                alert("Tu navegador no soporta geolocalización.");
+                return;
+            }
+
+            // Exigir permisos de ubicación con alta precisión
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    latOrig = pos.coords.latitude;
+                    lonOrig = pos.coords.longitude;
+                    
+                    map.setView([latOrig, lonOrig], 16);
+                    myMarker = L.marker([latOrig, lonOrig]).addTo(map).bindPopup("Tu ubicación exacta").openPopup();
+
+                    // ¡Permiso concedido! Desbloqueamos el botón de solicitar viaje
+                    let gpsStatus = document.getElementById('gpsStatus');
+                    gpsStatus.style.color = "#00ff66";
+                    gpsStatus.innerText = "✔ Ubicación GPS verificada con éxito";
+
+                    let btnPedir = document.getElementById('btnPedir');
+                    btnPedir.disabled = false;
+                    btnPedir.style.opacity = "1";
+                    btnPedir.style.cursor = "pointer";
+                },
+                error => {
+                    // Si el usuario deniega el permiso o falla el GPS
+                    let gpsStatus = document.getElementById('gpsStatus');
+                    gpsStatus.style.color = "#ff3333";
+                    gpsStatus.innerText = "❌ Permiso de ubicación denegado. Obligatorio activarlo para pedir viajes.";
+                    alert("Para poder solicitar un viaje en Primo, es obligatorio compartir tu ubicación GPS. Por favor, habilítala en la configuración de tu navegador y recarga la página.");
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
         }
 
         window.pedirViaje = function() {
+            // Doble validación estricta de seguridad
+            if (latOrig === null || lonOrig === null) {
+                alert("No se puede enviar la solicitud porque faltan tus coordenadas GPS. Otorga permisos de ubicación.");
+                return;
+            }
+
             let origen = document.getElementById('origen').value.trim();
             let destino = document.getElementById('destino').value.trim();
-            if(!origen || !destino) { alert("Ingresa origen y destino."); return; }
+            if(!origen || !destino) { alert("Ingresa dirección de origen y destino."); return; }
 
             let tripId = "trip_" + Date.now();
             let pasajeroNombre = localStorage.getItem("pasajero_nombre");
